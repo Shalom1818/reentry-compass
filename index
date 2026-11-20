@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>ReEntry Compass — Independent 50-State Reentry & Compliance Guide</title>
+  <link rel="manifest" href="./manifest.json" />
+  <meta name="theme-color" content="#0f172a" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body { background-color: #0f172a; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    #map { height: 290px; width: 100%; border-radius: 0.75rem; z-index: 10; }
+    .leaflet-popup-content-wrapper { background: #1e293b; color: #f8fafc; border: 1px solid #334155; }
+    .leaflet-popup-tip { background: #1e293b; }
+  </style>
+</head>
+<body class="min-h-screen pb-24">
+
+  <!-- Non-Government Privacy & Independence Pledge Modal (First Visit) -->
+  <div id="pledgeModal" class="fixed inset-0 z-50 bg-slate-950/95 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-emerald-500/40 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xl">🛡️</div>
+        <div>
+          <h2 class="text-lg font-bold text-white">Independent & Private Tool</h2>
+          <p class="text-xs text-emerald-400 font-semibold">NOT Affiliated With Any Government Agency</p>
+        </div>
+      </div>
+      <div class="text-sm text-slate-300 space-y-2.5 leading-relaxed">
+        <p><strong>1. Zero Government Connection:</strong> This app is completely independent. It is NOT connected to the Department of Corrections, Parole/Probation, Law Enforcement, or any court.</p>
+        <p><strong>2. Zero Server Location Logs:</strong> Live GPS is <strong>OFF by default</strong>. Any tier, curfew, or restriction addresses you enter stay <strong>100% locally on your phone</strong>—never uploaded or logged on any server.</p>
+        <p><strong>3. Informational Guide Only:</strong> State laws are shown in plain black-and-white so you know what rules apply, but this is not legal advice. Always confirm final housing or travel with your supervising officer or attorney.</p>
+      </div>
+      <button onclick="acceptPledge()" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition">
+        I Understand — Enter ReEntry Compass
+      </button>
+    </div>
+  </div>
+
+  <!-- Personal Status & Restrictions Drawer Modal -->
+  <div id="statusModal" class="fixed inset-0 z-50 bg-slate-950/90 flex items-end sm:items-center justify-center p-0 sm:p-4 hidden">
+    <div class="bg-slate-900 border border-slate-700 rounded-t-2xl sm:rounded-2xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div>
+          <h3 class="font-bold text-white text-base">My Supervision & Buffer Settings</h3>
+          <p class="text-xs text-slate-400">Saved locally on this device only</p>
+        </div>
+        <button onclick="toggleStatusModal(false)" class="text-slate-400 hover:text-white text-xl px-2">&times;</button>
+      </div>
+
+      <div class="space-y-3 text-sm">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Registry Tier / Risk Level</label>
+          <select id="cfgTier" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white">
+            <option value="none">Not on Registry / General Reentry</option>
+            <option value="1">Tier 1 / Level 1 (Low Risk)</option>
+            <option value="2" selected>Tier 2 / Level 2 (Moderate Risk)</option>
+            <option value="3">Tier 3 / Level 3 (High Risk / Predatory)</option>
+          </select>
+        </div>
+
+        <label class="flex items-center gap-2.5 bg-slate-800/70 p-3 rounded-lg border border-slate-700 cursor-pointer">
+          <input id="cfgMinor" type="checkbox" class="w-4 h-4 accent-emerald-500" checked />
+          <span class="text-xs text-slate-200">Enforce minor-involved / supervision school & park buffer (1,000+ ft minimum)</span>
+        </label>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Custom PO / Court Buffer Override (Feet)</label>
+          <input id="cfgCustomBuffer" type="number" step="50" min="0" value="1000" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+          <p class="text-[11px] text-slate-400 mt-1">App automatically enforces whichever is strictest: State Law, City Ordinance, or this number.</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Curfew Start</label>
+            <input id="cfgCurfewStart" type="time" value="22:00" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Curfew End</label>
+            <input id="cfgCurfewEnd" type="time" value="06:00" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+          </div>
+        </div>
+
+        <!-- Custom Personal No-Go Addresses -->
+        <div class="border-t border-slate-800 pt-3">
+          <label class="block text-xs font-semibold text-amber-300 mb-1">Personal "No-Go" Addresses (Victim Home/Work, Stay-Away Orders)</label>
+          <div class="flex gap-1.5 mb-2">
+            <input id="newNoGoLabel" type="text" placeholder="Label (e.g. Stay-Away Zone)" class="w-1/3 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white" />
+            <input id="newNoGoAddr" type="text" placeholder="Street address, City, State" class="w-2/3 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white" />
+          </div>
+          <button onclick="addCustomNoGo()" class="w-full py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs font-semibold text-amber-300">
+            + Geocode & Add Local Stay-Away Zone
+          </button>
+          <div id="customNoGoList" class="mt-2 space-y-1.5"></div>
+        </div>
+      </div>
+
+      <button onclick="saveProfile()" class="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm">
+        Save Locally & Recalculate
+      </button>
+    </div>
+  </div>
+
+  <!-- Top Header & Privacy Bar -->
+  <header class="bg-slate-900 border-b border-slate-800 sticky top-0 z-30">
+    <div class="max-w-2xl mx-auto px-4 py-2.5 flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2">
+        <span class="text-xl">🧭</span>
+        <div>
+          <h1 class="font-bold text-sm text-white leading-tight">ReEntry Compass</h1>
+          <span class="text-[10px] text-emerald-400 font-medium">50-State Independent Tool • GPS: <strong id="gpsBadge">OFF</strong></span>
+        </div>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <button onclick="toggleStatusModal(true)" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200">
+          ⚙️ My Status
+        </button>
+        <button onclick="quickWipe()" title="Erase all local settings immediately" class="px-2.5 py-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-xs font-bold text-rose-300">
+          Wipe
+        </button>
+      </div>
+    </div>
+
+    <!-- Universal 50-State Single Address Search Bar -->
+    <div class="max-w-2xl mx-auto px-4 pb-3">
+      <div class="relative flex gap-1.5">
+        <input
+          id="addressInput"
+          type="text"
+          placeholder="Type ANY U.S. address (e.g., 520 E Main St, Klamath Falls, OR)..."
+          class="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none"
+          onkeydown="if(event.key==='Enter') searchAddress()"
+        />
+        <button onclick="searchAddress()" id="searchBtn" class="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shrink-0">
+          Check
+        </button>
+      </div>
+      <!-- Quick Sample Address Chips -->
+      <div class="flex gap-1.5 overflow-x-auto pt-2 text-[11px] no-scrollbar">
+        <button onclick="quickSearch('520 E Main St, Klamath Falls, OR')" class="px-2.5 py-1 rounded-full bg-slate-800/90 hover:bg-slate-700 text-slate-300 shrink-0">Test OR (Near School)</button>
+        <button onclick="quickSearch('3231 Maywood Dr, Klamath Falls, OR')" class="px-2.5 py-1 rounded-full bg-slate-800/90 hover:bg-slate-700 text-slate-300 shrink-0">Test OR (Food Bank)</button>
+        <button onclick="quickSearch('520 18th St, Sacramento, CA')" class="px-2.5 py-1 rounded-full bg-slate-800/90 hover:bg-slate-700 text-slate-300 shrink-0">Test CA (2,000ft)</button>
+        <button onclick="quickSearch('906 W Lynn St, Austin, TX')" class="px-2.5 py-1 rounded-full bg-slate-800/90 hover:bg-slate-700 text-slate-300 shrink-0">Test TX</button>
+        <button onclick="quickSearch('600 N Ashley Dr, Tampa, FL')" class="px-2.5 py-1 rounded-full bg-slate-800/90 hover:bg-slate-700 text-slate-300 shrink-0">Test FL</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="max-w-2xl mx-auto px-4 pt-4 space-y-4">
+
+    <!-- TAB 1: RED-ZONE MAP & CLEARANCE VERDICT -->
+    <section id="tab-map" class="space-y-3">
+      <div id="verdictCard" class="p-4 rounded-2xl bg-slate-900 border border-slate-800">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <span id="detectedStateBadge" class="inline-block px-2 py-0.5 rounded bg-slate-800 text-emerald-400 text-[11px] font-bold mb-1">
+              Detected State: OREGON (OR)
+            </span>
+            <h2 id="verdictTitle" class="text-base font-bold text-white">Enter any U.S. address above to check Red Zones</h2>
+            <p id="verdictSubtitle" class="text-xs text-slate-400 mt-0.5">Static Map Mode (No live GPS tracking). Checks state laws + schools, parks & daycares.</p>
+          </div>
+          <span id="verdictBadge" class="px-3 py-1 rounded-full text-xs font-extrabold bg-slate-800 text-slate-300">READY</span>
+        </div>
+        <div id="conflictList" class="mt-3 space-y-1.5"></div>
+      </div>
+
+      <div class="flex items-center justify-between bg-slate-900/80 border border-slate-800 rounded-xl px-3.5 py-2 text-xs">
+        <span class="text-slate-300">Optional Device Location (never sent to server)</span>
+        <button onclick="toggleOptionalGPS()" id="gpsToggleBtn" class="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold">
+          Turn On Local GPS
+        </button>
+      </div>
+
+      <div id="map" class="border border-slate-800 shadow-lg"></div>
+    </section>
+
+    <!-- TAB 2: DAY-1 SURVIVAL, HOUSING, JOBS, DMV & LEGAL AID -->
+    <section id="tab-resources" class="space-y-3 hidden">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+        <h2 class="text-base font-bold text-white">Day-1 Survival, Housing & Legal Help (<span class="stateCodeLabel">OR</span>)</h2>
+        <p class="text-xs text-slate-400 mt-0.5">No-ID food banks, DMV ID conversion, civil legal aid, and pre-vetted housing/work.</p>
+        <div class="flex gap-1.5 overflow-x-auto pt-3 text-xs">
+          <button onclick="filterResources('all')" class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-semibold shrink-0">All</button>
+          <button onclick="filterResources('food_bank_no_id')" class="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 shrink-0">Food & Clothes</button>
+          <button onclick="filterResources('housing_transitional')" class="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 shrink-0">Housing</button>
+          <button onclick="filterResources('dmv_id_office')" class="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 shrink-0">DMV & Benefits</button>
+          <button onclick="filterResources('legal_aid')" class="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 shrink-0">Legal Aid</button>
+        </div>
+      </div>
+      <div id="resourceList" class="space-y-2.5"></div>
+    </section>
+
+    <!-- TAB 3: BLACK & WHITE STATE STATUTES & DEADLINE CALCULATOR -->
+    <section id="tab-laws" class="space-y-3 hidden">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-[11px] font-bold text-amber-400 uppercase tracking-wider">Informational Reference • Not Legal Advice</span>
+            <h2 id="lawStateTitle" class="text-lg font-bold text-white">Oregon Statutory Rules</h2>
+            <p id="lawCitation" class="text-xs text-slate-400">ORS 163A.010 – 163A.100 & ORS 144.642</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 text-center">
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+            <div id="lawRegDays" class="text-lg font-extrabold text-emerald-400">10 Days</div>
+            <div class="text-[10px] text-slate-400">Initial Register</div>
+          </div>
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+            <div id="lawMoveDays" class="text-lg font-extrabold text-amber-400">10 Days</div>
+            <div class="text-[10px] text-slate-400">Move / Job Report</div>
+          </div>
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+            <div id="lawVisitorDays" class="text-lg font-extrabold text-sky-400">10 Days</div>
+            <div class="text-[10px] text-slate-400">Visitor Clock</div>
+          </div>
+        </div>
+
+        <div class="bg-slate-950/90 border border-slate-800 rounded-xl p-3 space-y-1.5">
+          <div class="text-xs font-bold text-slate-200">Residency & Presence Buffer Summary:</div>
+          <p id="lawBufferNotes" class="text-xs text-slate-300 leading-relaxed"></p>
+          <div class="text-[11px] text-slate-400 pt-1"><strong>Registering Agency:</strong> <span id="lawAgency"></span></div>
+        </div>
+
+        <div class="border-t border-slate-800 pt-3">
+          <label class="block text-xs font-bold text-white mb-1">Statutory Deadline Calculator (Release or Move Date)</label>
+          <div class="flex gap-2">
+            <input id="calcDateInput" type="date" onchange="calculateDeadline()" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white w-full" />
+          </div>
+          <p id="calcResult" class="text-xs text-emerald-400 font-semibold mt-2"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: CALENDAR, BUS REMINDERS & ICAOS TRAVEL -->
+    <section id="tab-schedule" class="space-y-3 hidden">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+        <h2 class="text-base font-bold text-white">Appointments, Bus Timing & Curfew Reminders</h2>
+        <p class="text-xs text-slate-400">Stored locally on your device. Add PO check-ins, court dates, or UA windows with transit buffer time.</p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <input id="remTitle" type="text" placeholder="Event (e.g. PO Check-in)" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
+          <input id="remDateTime" type="datetime-local" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
+          <input id="remBusNote" type="text" placeholder="Bus Route (e.g. Route 2)" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
+        </div>
+        <button onclick="addReminder()" class="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs">
+          + Save Appointment & Bus Reminder
+        </button>
+        <div id="reminderList" class="space-y-2 pt-1"></div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2">
+        <h3 class="text-sm font-bold text-amber-300">Interstate Compact (ICAOS) & Out-of-State Travel</h3>
+        <p class="text-xs text-slate-300 leading-relaxed">
+          On active parole/probation, leaving your county overnight requires a written PO travel permit. Relocating to another state for <strong>45+ consecutive days</strong> requires formal <strong>ICAOS transfer approval</strong> before moving.
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Bottom Navigation Bar -->
+  <nav class="fixed bottom-0 inset-x-0 bg-slate-900/95 backdrop-blur border-t border-slate-800 z-30">
+    <div class="max-w-2xl mx-auto grid grid-cols-4 text-center py-2 text-[11px] font-semibold">
+      <button onclick="switchTab('map')" id="nav-map" class="text-emerald-400 flex flex-col items-center gap-0.5">
+        <span class="text-base">🗺️</span><span>Red Zones</span>
+      </button>
+      <button onclick="switchTab('resources')" id="nav-resources" class="text-slate-400 hover:text-white flex flex-col items-center gap-0.5">
+        <span class="text-base">🏠</span><span>Help & Jobs</span>
+      </button>
+      <button onclick="switchTab('laws')" id="nav-laws" class="text-slate-400 hover:text-white flex flex-col items-center gap-0.5">
+        <span class="text-base">⚖️</span><span>State Laws</span>
+      </button>
+      <button onclick="switchTab('schedule')" id="nav-schedule" class="text-slate-400 hover:text-white flex flex-col items-center gap-0.5">
+        <span class="text-base">🚌</span><span>Calendar/Bus</span>
+      </button>
+    </div>
+  </nav>
+
+  <script>
+    const SUPABASE_URL = 'https://dvpkxtaehuhpjxdbtdvz.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_Wt37z7aOLZNZ9k4faZAKVQ_9kCipkuo';
+    const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    const STATE_NAMES_TO_CODES = {
+      'alabama':'AL','alaska':'AK','arizona':'AZ','arkansas':'AR','california':'CA','colorado':'CO',
+      'connecticut':'CT','delaware':'DE','florida':'FL','georgia':'GA','hawaii':'HI','idaho':'ID',
+      'illinois':'IL','indiana':'IN','iowa':'IA','kansas':'KS','kentucky':'KY','louisiana':'LA',
+      'maine':'ME','maryland':'MD','massachusetts':'MA','michigan':'MI','minnesota':'MN','mississippi':'MS',
+      'missouri':'MO','montana':'MT','nebraska':'NE','nevada':'NV','new hampshire':'NH','new jersey':'NJ',
+      'new mexico':'NM','new york':'NY','north carolina':'NC','north dakota':'ND','ohio':'OH','oklahoma':'OK',
+      'oregon':'OR','pennsylvania':'PA','rhode island':'RI','south carolina':'SC','south dakota':'SD',
+      'tennessee':'TN','texas':'TX','utah':'UT','vermont':'VT','virginia':'VA','washington':'WA',
+      'west virginia':'WV','wisconsin':'WI','wyoming':'WY'
+    };
+
+    let profile = JSON.parse(localStorage.getItem('rc_profile') || 'null') || {
+      tier: '2',
+      isMinor: true,
+      customBufferFt: 1000,
+      curfewStart: '22:00',
+      curfewEnd: '06:00',
+      customNoGo: []
+    };
+    let reminders = JSON.parse(localStorage.getItem('rc_reminders') || '[]');
+    let activeStateCode = 'OR';
+    let currentPolicy = null;
+    let allResources = [];
+    let map, markerLayer, circleLayer, gpsWatchId = null;
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!localStorage.getItem('rc_pledge_accepted')) {
+        document.getElementById('pledgeModal').classList.remove('hidden');
+      }
+      syncProfileInputs();
+      renderReminders();
+
+      map = L.map('map').setView([42.2249, -121.7817], 13);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap &copy; CARTO'
+      }).addTo(map);
+      markerLayer = L.layerGroup().addTo(map);
+      circleLayer = L.layerGroup().addTo(map);
+
+      await loadStateData('OR');
+    });
+
+    function acceptPledge() {
+      localStorage.setItem('rc_pledge_accepted', '1');
+      document.getElementById('pledgeModal').classList.add('hidden');
+    }
+
+    function toggleStatusModal(show) {
+      document.getElementById('statusModal').classList.toggle('hidden', !show);
+      if (show) renderCustomNoGo();
+    }
+
+    function syncProfileInputs() {
+      document.getElementById('cfgTier').value = profile.tier;
+      document.getElementById('cfgMinor').checked = profile.isMinor;
+      document.getElementById('cfgCustomBuffer').value = profile.customBufferFt;
+      document.getElementById('cfgCurfewStart').value = profile.curfewStart;
+      document.getElementById('cfgCurfewEnd').value = profile.curfewEnd;
+    }
+
+    function saveProfile() {
+      profile.tier = document.getElementById('cfgTier').value;
+      profile.isMinor = document.getElementById('cfgMinor').checked;
+      profile.customBufferFt = parseInt(document.getElementById('cfgCustomBuffer').value || '0', 10);
+      profile.curfewStart = document.getElementById('cfgCurfewStart').value;
+      profile.curfewEnd = document.getElementById('cfgCurfewEnd').value;
+      localStorage.setItem('rc_profile', JSON.stringify(profile));
+      toggleStatusModal(false);
+      if (document.getElementById('addressInput').value.trim()) searchAddress();
+    }
+
+    function quickWipe() {
+      if (confirm('Erase all local settings, custom stay-away zones, and reminders from this device?')) {
+        localStorage.clear();
+        location.reload();
+      }
+    }
+
+    function quickSearch(addr) {
+      document.getElementById('addressInput').value = addr;
+      searchAddress();
+    }
+
+    async function searchAddress() {
+      const query = document.getElementById('addressInput').value.trim();
+      if (!query) return;
+      const btn = document.getElementById('searchBtn');
+      btn.textContent = '...';
+
+      try {
+        const geoResp = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=us&limit=1&q=${encodeURIComponent(query)}`
+        );
+        const geoData = await geoResp.json();
+        if (!geoData || !geoData.length) {
+          alert('Address not found. Try including street, city, and 2-letter state (e.g., 520 E Main St, Klamath Falls, OR).');
+          return;
+        }
+
+        const place = geoData[0];
+        const lat = parseFloat(place.lat);
+        const lng = parseFloat(place.lon);
+        const addr = place.address || {};
+        const stateName = (addr.state || '').toLowerCase();
+        const isoCode = addr['ISO3166-2-lvl4'] ? addr['ISO3166-2-lvl4'].split('-')[1] : null;
+        const stateCode = (isoCode || STATE_NAMES_TO_CODES[stateName] || 'OR').toUpperCase();
+        const cityName = addr.city || addr.town || addr.village || null;
+        const countyName = (addr.county || '').replace(/ County$/i, '') || null;
+
+        if (stateCode !== activeStateCode) {
+          await loadStateData(stateCode);
+        }
+
+        const { data: clearance, error } = await db.rpc('check_address_clearance', {
+          p_lat: lat,
+          p_lng: lng,
+          p_state_code: stateCode,
+          p_city_name: cityName,
+          p_county_name: countyName,
+          p_user_custom_buffer_ft: profile.customBufferFt,
+          p_is_minor_offense: profile.isMinor,
+          p_warning_margin_ft: 300
+        });
+
+        if (error) throw error;
+
+        const personalHits = profile.customNoGo.map(z => {
+          const distFt = Math.round(haversineFt(lat, lng, z.lat, z.lng));
+          return {
+            name: z.label,
+            zone_type: 'personal_stay_away',
+            distance_ft: distFt,
+            severity: distFt <= profile.customBufferFt ? 'FAIL' : distFt <= profile.customBufferFt + 300 ? 'WARN' : 'CLEAR',
+            lat: z.lat,
+            lng: z.lng
+          };
+        }).filter(z => z.severity !== 'CLEAR');
+
+        const allZones = [...personalHits, ...(clearance.nearby_zones || [])];
+        const finalVerdict = allZones.some(z => z.severity === 'FAIL')
+          ? 'FAIL'
+          : allZones.length > 0 ? 'WARN' : 'PASS';
+
+        renderClearanceResult(place.display_name, lat, lng, stateCode, finalVerdict, clearance.effective_buffer_ft, allZones);
+      } catch (err) {
+        console.error(err);
+        alert('Error checking address: ' + err.message);
+      } finally {
+        btn.textContent = 'Check';
+      }
+    }
+
+    function renderClearanceResult(displayName, lat, lng, stateCode, verdict, bufferFt, zones) {
+      document.getElementById('detectedStateBadge').textContent = `Detected State: ${stateCode} • Enforced Buffer: ${bufferFt.toLocaleString()} ft`;
+      document.getElementById('verdictTitle').textContent = displayName.split(',').slice(0, 3).join(',');
+
+      const badge = document.getElementById('verdictBadge');
+      const card = document.getElementById('verdictCard');
+      card.className = 'p-4 rounded-2xl border transition ' + (
+        verdict === 'FAIL' ? 'bg-rose-950/50 border-rose-600' :
+        verdict === 'WARN' ? 'bg-amber-950/40 border-amber-500' :
+        'bg-emerald-950/40 border-emerald-600'
+      );
+      badge.textContent = verdict === 'FAIL' ? 'RED ZONE' : verdict === 'WARN' ? 'CAUTION' : 'CLEAR';
+      badge.className = 'px-3 py-1 rounded-full text-xs font-extrabold shrink-0 ' + (
+        verdict === 'FAIL' ? 'bg-rose-600 text-white' :
+        verdict === 'WARN' ? 'bg-amber-500 text-slate-950' :
+        'bg-emerald-600 text-white'
+      );
+
+      document.getElementById('verdictSubtitle').textContent =
+        verdict === 'FAIL'
+          ? `Inside ${bufferFt.toLocaleString()} ft exclusion zone. Do not apply or enter without written PO approval.`
+          : verdict === 'WARN'
+          ? `Within 300 ft caution margin of a restricted buffer boundary.`
+          : `No mapped schools, parks, daycares, or personal stay-away zones within ${bufferFt.toLocaleString()} ft.`;
+
+      const list = document.getElementById('conflictList');
+      list.innerHTML = zones.map(z => `
+        <div class="flex items-center justify-between text-xs px-3 py-2 rounded-lg ${z.severity === 'FAIL' ? 'bg-rose-950 text-rose-200 border border-rose-800' : 'bg-amber-950 text-amber-200 border border-amber-800'}">
+          <span><strong>${z.name}</strong> (${z.zone_type.replace(/_/g, ' ')})</span>
+          <span class="font-bold">${z.distance_ft.toLocaleString()} ft away</span>
+        </div>
+      `).join('');
+
+      markerLayer.clearLayers();
+      circleLayer.clearLayers();
+      map.setView([lat, lng], 15);
+
+      L.marker([lat, lng]).addTo(markerLayer).bindPopup(`<strong>Searched Address</strong><br/>Status: ${verdict}`).openPopup();
+
+      const bufferMeters = bufferFt * 0.3048;
+      zones.forEach(z => {
+        L.circle([z.lat, z.lng], {
+          radius: bufferMeters,
+          color: '#ef4444',
+          fillColor: '#ef4444',
+          fillOpacity: 0.25,
+          weight: 2
+        }).addTo(circleLayer).bindPopup(`<strong>${z.name}</strong><br/>${bufferFt} ft Restriction Buffer`);
+      });
+    }
+
+    async function loadStateData(stateCode) {
+      activeStateCode = stateCode;
+      document.querySelectorAll('.stateCodeLabel').forEach(el => el.textContent = stateCode);
+
+      const { data: policy } = await db.from('state_policies').select('*').eq('state_code', stateCode).single();
+      if (policy) {
+        currentPolicy = policy;
+        document.getElementById('lawStateTitle').textContent = `${policy.state_name} Statutory Rules`;
+        document.getElementById('lawCitation').textContent = policy.statute_citation;
+        document.getElementById('lawRegDays').textContent = `${policy.registration_window_days} Days`;
+        document.getElementById('lawMoveDays').textContent = `${policy.move_notification_days} Days`;
+        document.getElementById('lawVisitorDays').textContent = `${policy.visitor_trigger_days} Days`;
+        document.getElementById('lawBufferNotes').textContent = policy.policy_rules?.notes || '';
+        document.getElementById('lawAgency').textContent = policy.policy_rules?.registry_agency || '';
+      }
+
+      const { data: resources } = await db.from('reentry_resources').select('*').eq('state_code', stateCode);
+      allResources = resources || [];
+      renderResources(allResources);
+    }
+
+    function filterResources(cat) {
+      if (cat === 'all') return renderResources(allResources);
+      renderResources(allResources.filter(r => r.category.includes(cat)));
+    }
+
+    function renderResources(items) {
+      const container = document.getElementById('resourceList');
+      if (!items.length) {
+        container.innerHTML = `<div class="p-4 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-400">
+          Local directory entries for <strong>${activeStateCode}</strong> are being expanded. Call <strong>211</strong> nationwide or check State Legal Aid in the State Laws tab.
+        </div>`;
+        return;
+      }
+      container.innerHTML = items.map(r => `
+        <div class="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-1.5">
+          <div class="flex items-start justify-between gap-2">
+            <h3 class="font-bold text-sm text-white">${r.name}</h3>
+            ${r.no_id_required ? '<span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold shrink-0">NO ID NEEDED</span>' : ''}
+          </div>
+          <p class="text-xs text-slate-300">${r.street_address}</p>
+          ${r.bus_route_notes ? `<p class="text-[11px] text-sky-400">🚌 ${r.bus_route_notes}</p>` : ''}
+          ${r.details?.note ? `<p class="text-xs text-slate-400 pt-1">${r.details.note}</p>` : ''}
+          <div class="flex items-center gap-2 pt-2">
+            ${r.phone ? `<a href="tel:${r.phone}" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white">📞 ${r.phone}</a>` : ''}
+            <button onclick="switchTab('map'); quickSearch('${r.street_address.replace(/'/g, "\\'")}')" class="px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-xs font-semibold text-emerald-300">
+              Verify Red Zones
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function addCustomNoGo() {
+      const label = document.getElementById('newNoGoLabel').value.trim() || 'Custom Stay-Away Zone';
+      const addr = document.getElementById('newNoGoAddr').value.trim();
+      if (!addr) return;
+      const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=us&limit=1&q=${encodeURIComponent(addr)}`);
+      const data = await resp.json();
+      if (!data.length) return alert('Could not locate that address.');
+      profile.customNoGo.push({ label, addr, lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
+      localStorage.setItem('rc_profile', JSON.stringify(profile));
+      document.getElementById('newNoGoLabel').value = '';
+      document.getElementById('newNoGoAddr').value = '';
+      renderCustomNoGo();
+    }
+
+    function renderCustomNoGo() {
+      const el = document.getElementById('customNoGoList');
+      el.innerHTML = profile.customNoGo.map((z, i) => `
+        <div class="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs">
+          <span><strong class="text-amber-300">${z.label}:</strong> ${z.addr}</span>
+          <button onclick="profile.customNoGo.splice(${i},1); localStorage.setItem('rc_profile', JSON.stringify(profile)); renderCustomNoGo();" class="text-rose-400 font-bold px-1.5">&times;</button>
+        </div>
+      `).join('');
+    }
+
+    function toggleOptionalGPS() {
+      const btn = document.getElementById('gpsToggleBtn');
+      const badge = document.getElementById('gpsBadge');
+      if (gpsWatchId !== null) {
+        navigator.geolocation.clearWatch(gpsWatchId);
+        gpsWatchId = null;
+        btn.textContent = 'Turn On Local GPS';
+        badge.textContent = 'OFF';
+        return;
+      }
+      if (!navigator.geolocation) return alert('Geolocation not supported on this browser.');
+      gpsWatchId = navigator.geolocation.watchPosition(pos => {
+        badge.textContent = 'LOCAL ONLY';
+        btn.textContent = 'Turn Off GPS';
+        map.setView([pos.coords.latitude, pos.coords.longitude], 15);
+      }, () => alert('Location permission denied. Static search remains active.'));
+    }
+
+    function calculateDeadline() {
+      const val = document.getElementById('calcDateInput').value;
+      if (!val || !currentPolicy) return;
+      const d = new Date(val + 'T12:00:00');
+      d.setDate(d.getDate() + currentPolicy.registration_window_days);
+      document.getElementById('calcResult').textContent =
+        `Mandatory In-Person Deadline (${currentPolicy.registration_window_days} days in ${currentPolicy.state_code}): ${d.toDateString()}`;
+    }
+
+    function addReminder() {
+      const title = document.getElementById('remTitle').value.trim();
+      const dt = document.getElementById('remDateTime').value;
+      const bus = document.getElementById('remBusNote').value.trim();
+      if (!title || !dt) return;
+      reminders.push({ title, dt, bus });
+      localStorage.setItem('rc_reminders', JSON.stringify(reminders));
+      document.getElementById('remTitle').value = '';
+      document.getElementById('remBusNote').value = '';
+      renderReminders();
+    }
+
+    function renderReminders() {
+      const el = document.getElementById('reminderList');
+      el.innerHTML = reminders.map((r, i) => `
+        <div class="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs">
+          <div>
+            <div class="font-bold text-white">${r.title}</div>
+            <div class="text-slate-400">${new Date(r.dt).toLocaleString()} ${r.bus ? `• 🚌 ${r.bus}` : ''}</div>
+          </div>
+          <button onclick="reminders.splice(${i},1); localStorage.setItem('rc_reminders', JSON.stringify(reminders)); renderReminders();" class="text-rose-400 font-bold text-base px-2">&times;</button>
+        </div>
+      `).join('');
+    }
+
+    function switchTab(name) {
+      ['map', 'resources', 'laws', 'schedule'].forEach(t => {
+        document.getElementById(`tab-${t}`).classList.toggle('hidden', t !== name);
+        document.getElementById(`nav-${t}`).className = t === name
+          ? 'text-emerald-400 flex flex-col items-center gap-0.5'
+          : 'text-slate-400 hover:text-white flex flex-col items-center gap-0.5';
+      });
+      if (name === 'map' && map) setTimeout(() => map.invalidateSize(), 100);
+    }
+
+    function haversineFt(lat1, lon1, lat2, lon2) {
+      const R = 20902231;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+  </script>
+</body>
+</html>
